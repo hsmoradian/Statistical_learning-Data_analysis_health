@@ -1,0 +1,1718 @@
+---
+title: "Final"
+author: "Hossein Moradian"
+date: "Grad student- Mech Engineering"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+#Problem 1
+
+
+(1)
+
+
+The goal of this problem is to test the efficacy and safety of hormone therapy(HT)  for  prevention  of  recurrent  coronary  heart  disease  (CHD)  events  in  women.
+For this problem we wan to find the effects of parameters HT: random assignment to HT, Age:  age in years, smoking:  current smoker (1) or not(0), drinkany:  any current alcohol consumption (yes=1), exercise:  exercise at least 3 times per week (yes=1), statins:  statin use (yes=1), diabetes:  presence of diabetes (yes=1) and  BMI index on the value of LDL of different wowen. 
+
+
+For this data, we consider the typical linear model specifies that for known predictor variables $xi= (1,x_{i2},...,x_{ir})$ (which means "HT","age","smoking","drinkany","exercise","statins","diabetes","BMI" and their combinations ) and unknown regression coefficients $\beta_i=(\beta_1,\beta_2,...,\beta_r)$. 
+
+
+
+
+(2)
+
+exploratory data analysis :
+
+
+For our analysis we first plot effects of different parameters on the value of LDL1.
+
+```{r }
+rm(list=ls())
+#hersdata_1 <- read.csv(file="Downloads/hersdata_1.csv",header=T, sep="")
+hersdata=read.csv(paste("http://www.ics.uci.edu/~mguindan/teaching/introBDA/hersdata_1.csv", sep=""), as.is=T)
+hersdata=hersdata[-c(176,190),]
+attach(hersdata)
+options(contrasts=c("contr.treatment","contr.poly"))
+#data=na.omit(hersdata)
+```
+
+```{r}
+pairs(~as.factor(HT)+age+as.factor(smoking)+as.factor(drinkany)+LDL1,labels=c("HT","age","smoking","drinkany","LDL1"),data=hersdata)
+pairs(~as.factor(exercise)+as.factor(statins)+as.factor(diabetes)+BMI+LDL1,labels=c("exercise","statins","diabetes","BMI","LDL1"),data=hersdata)
+
+```
+
+
+As we can see in the figures: the value of HT(hormone therapy or placebo) has effects on the value of LDL1(for hormone therapy the variance of data is a bit bigger).   
+
+
+For the age there is effect on the value of the LDL1 The younger ones have lower LDL1. So  we can include this feature. 
+
+For Smokers the figure shows that the value of LDL1 has smaller mean and smaller variance so we include Smoking feature.
+
+Moreover, for drinkany there is slightly change in the mean of data. So include this feature as well.
+
+For the No-exercise data the value of LDL1 in bigger. the same effect exists for the statin users. Statin users have bigger LDL1. So, we include these parameters.
+
+Also, the figure shows that the value of LDL1 for the ones with diabetes is lower. Also for the BMI index we get greater value of LDL1for the ones with lower BMI. So, we can conclude all  other parameters have effect on the value of LDL1.
+
+
+
+
+
+
+(3)
+
+
+
+Selecting the priors:
+
+In regression analysis, informative conjugate priors may be hard to elicit.  At the same time, the mathematical results are quite elegant, as usual. For this problem we use g-prior for the coefficients. By using g-prior, the prior places more mass in areas of the parameter space where we expect the data to be less informative about the parameters. 
+
+
+So for the parameters we  consider g-prior as:
+$$\beta|\tau\sim N_r(0,\frac{g}{\tau}(X'X)^{-1})$$
+where we have:
+$$\tau\sim Ga(a,b)$$
+$$g=max(n,r^2)$$
+
+Here, we make the assumption that the design matrix X is known and fixed, so even the prior with $\beta_0=0$ and $\tilde{X}=X$ is OK to use. For our problem we use $a=b=0.001$. 
+
+
+Selecting the modeles:
+
+Based on the exploratory data analysis we did in the previous part we can conclude that all the other parameters have effect on the value of LDL1. So, we consider different models with linear parameters :
+
+(1) For the fist model we consider the effect of :
+
+"HT","exercise","smoking","statins","BMI","age"
+
+Since it seems that there have greater effect on the LDL1.
+
+we evaluate the matching parameters:
+
+```{r}
+library(R2jags)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age)
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC1=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML1 <- sum(log(CPO))
+Eva1=c(DIC1,BIC1,LPML1)
+print(Eva1)
+```
+
+
+For the second model, we add the "drinkany" and "diabetes" features to the previous model to check their effects.
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(drinkany=="yes")+as.factor(diabetes=="yes"))
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8] + beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit0<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC2=LDL1.fit0$BUGSoutput$DIC
+pm_tau=LDL1.fit0$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit0$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC2 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(drinkany=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit0$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML2 <- sum(log(CPO))
+Eva2=c(DIC2,BIC2,LPML2)
+print(Eva2)
+```
+
+
+The matching parameters shows that there is no change with the parameters. So we can exclude these parameters. For the third model we also exclude "age" to see its effect:
+
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI)
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] 
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit0<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC3=LDL1.fit0$BUGSoutput$DIC
+pm_tau=LDL1.fit0$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit0$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]"), "mean"]
+BIC3 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit0$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML3 <- sum(log(CPO))
+Eva3=c(DIC3,BIC3,LPML3)
+print(Eva3)
+```
+
+The results becomes a bit worse by removing "age". So for the next model we include "age" and remove "BMI" index to check its effect
+
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+age)
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] 
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit0<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC4=LDL1.fit0$BUGSoutput$DIC
+pm_tau=LDL1.fit0$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit0$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]"), "mean"]
+BIC4 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*age))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit0$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML4 <- sum(log(CPO))
+Eva4=c(DIC4,BIC4,LPML4)
+print(Eva4)
+```
+
+The results didn't change too much by removing "BMI". So we include BMI index. Also for the next model we remove "smoking" to check its effect:
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(smoking=="yes")+as.factor(statins=="yes")+age+BMI)
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+beta[6]*Xmat[i,6]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit5<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC5=LDL1.fit0$BUGSoutput$DIC
+pm_tau=LDL1.fit0$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit0$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]"), "mean"]
+BIC5 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(smoking=="yes",1,0)+pm_coeff[4]*ifelse(statins=="yes",1,0)+pm_coeff[5]*age+pm_coeff[6]*BMI))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit0$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML5 <- sum(log(CPO))
+Eva5=c(DIC5,BIC5,LPML5)
+print(Eva5)
+```
+
+
+So we see the worst result for the last model.
+
+Conclusion:
+
+```{r}
+print(Eva1)
+print(Eva2)
+print(Eva3)
+print(Eva4)
+print(Eva5)
+```
+
+
+Based on the evalution we did, we can conclude that for the model with the parameters: "HT","exercise","smoking","statins","BMI","age" we get the best model with lower matching parameters.
+
+
+
+(4)
+
+posterior inferences for regression parameters and for subpopulation means in appro- priately designed tables or figures:
+ 
+ For the posterior of the different parameters we get :
+
+```{r}
+library(bayesplot)
+LDL1.mcmc<-as.mcmc(LDL1.fit1)
+mcmc_intervals(LDL1.mcmc, pars=c("beta[1]","beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.9, # 90% - outer
+point_est = "mean"
+)
+```
+
+The result shows that Parameters "HT" and "statin" have big effects on the value of LDL1. while effects of others may be slight. 
+
+For the posterior distribution of the parameters we have:
+
+```{r}
+ library(bayesplot)
+
+jags.mcmc=as.mcmc(LDL1.fit1) 
+par(mfrow=c(1,2)) 
+mcmc_dens(jags.mcmc,pars=c("beta[1]"))
+mcmc_dens(jags.mcmc,pars=c("beta[2]"))
+mcmc_dens(jags.mcmc,pars=c("beta[3]"))
+mcmc_dens(jags.mcmc,pars=c("beta[4]"))
+mcmc_dens(jags.mcmc,pars=c("beta[5]"))
+mcmc_dens(jags.mcmc,pars=c("beta[6]"))
+mcmc_dens(jags.mcmc,pars=c("beta[7]"))
+``` 
+
+We also find the posterior distribution of subpopulation:
+
+ (1) HT vs Not-HT samples
+ 
+ (2) statins vs Not-statins samples
+
+
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age)
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+sub_HT <- beta[1] + beta[2] + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_NHT <- beta[1]  + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_statins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_Nstatins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+
+}"
+
+jags.param=c("beta","tau","mu","CPOinv","sub_HT","sub_NHT","sub_statins","sub_Nstatins")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC1=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML1 <- sum(log(CPO))
+Eva1=c(DIC1,BIC1,LPML1)
+print(Eva1)
+```
+
+
+
+Now we plot the posteriors to see the effects:
+
+
+```{r}
+library(bayesplot)
+LDL1.mcmc<-as.mcmc(LDL1.fit1)
+mcmc_intervals(LDL1.mcmc, pars=c("sub_HT","sub_NHT","sub_statins","sub_Nstatins"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.99, # 90% - outer
+point_est = "mean"
+)
+```
+
+CLINICAL IMPORTANCE:
+
+The result shows that the use of statins  affect LDL1 since the mean of LDL1 for statin users are smaller than the ones that do not use statins. Moreover,  the results show that hormone therapy can decrease the LDL1 as shown in the figure. Also the coefficient of HT  and statins are negative which confirm the conclusion.
+
+So we can conclude that use of statins decreases the value of LDL1. the same effect exists for the hormone therapy. 
+
+
+
+(5) 
+
+Here in order to assess the effect of HT in combination with statins we add the nonlinear features "HT""statins" as a effects of their interactions. 
+
+
+
+```{r}
+
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(HT=="hormone therapy")*as.factor(statins=="yes"))
+
+
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+sub_HT <- beta[1] + beta[2] + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_NHT <- beta[1]  + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_statins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_Nstatins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+}"
+
+jags.param=c("beta","tau","mu","CPOinv","sub_HT","sub_NHT","sub_statins","sub_Nstatins")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC1=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML1 <- sum(log(CPO))
+Eva1=c(DIC1,BIC1,LPML1)
+print(Eva1)
+```
+
+
+Now, we plot the posterior distribution of the interaction of "HT" and "HT"+ "statins".
+
+```{r}
+ library(bayesplot)
+
+jags.mcmc=as.mcmc(LDL1.fit1) 
+par(mfrow=c(1,2)) 
+mcmc_dens(jags.mcmc,pars=c("beta[2]"))
+mcmc_dens(jags.mcmc,pars=c("beta[8]"))
+``` 
+
+
+The mean of the coefficient is 5 which shows that the effect of HT for statins users and non-users is important. HT usually decreases the value of LDL1 and by the interaction results we can conclude that for the statins users the value of LDL1 increases by the hormone therapy which is really interesting.
+
+
+
+
+(6)
+
+
+We standardize the covariance by use:
+
+$$X=\frac{X-mean(X)}{sd(X)}$$
+We had "BMI" in our model. We also include "BMI"*"statin" in the model.
+
+
+```{r}
+BMI=(BMI-mean(BMI))/sd(BMI)
+age=(age-mean(age))/sd(age)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI)
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+sub_HT <- beta[1] + beta[2] + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_NHT <- beta[1]  + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]*mean(Xmat[,5])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_statins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+beta[5]+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+sub_Nstatins <- beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+ beta[6]*mean(Xmat[,6]) + beta[7]*mean(Xmat[,7])
+}"
+
+jags.param=c("beta","tau","mu","CPOinv","sub_HT","sub_NHT","sub_statins","sub_Nstatins")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC1=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML1 <- sum(log(CPO))
+Eva1=c(DIC1,BIC1,LPML1)
+print(Eva1)
+```
+Now we plot the mean and variance of the posterior parameters:
+
+```{r}
+library(bayesplot)
+LDL1.mcmc<-as.mcmc(LDL1.fit1)
+mcmc_intervals(LDL1.mcmc, pars=c("beta[6]","beta[8]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.9, # 90% - outer
+point_est = "mean"
+)
+```
+
+The results show that BMI has positive effects for higher BMI index we get higher LDL1. while the interaction between BMI and statins-users is different. For the statins users we can conclude that higher BMI index leads to better effect of statins on the LDL1. So for the ones with higher BMI index statins is more effective. 
+
+
+
+(7)  
+
+To evaluate the effect of smoking we plot the posterior distribution of parameter associated with smoking:
+
+```{r}
+ library(bayesplot)
+
+jags.mcmc=as.mcmc(LDL1.fit1) 
+par(mfrow=c(1,2)) 
+mcmc_dens(jags.mcmc,pars=c("beta[4]"))
+```
+
+The result shows that smoking has positive effect. i.e. for smokers the LDL1 is bigger than non-smokers. However, the mean is not too large, so its effect is not very huge. 
+
+
+(8)
+
+We add "diabetes" to our model as:
+
+```{r}
+BMI=(BMI-mean(BMI))/sd(BMI)
+age=(age-mean(age))/sd(age)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC9=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC9 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML9 <- sum(log(CPO))
+Eva9=c(DIC9,BIC9,LPML9)
+```
+
+For the two models using the LPML criterion we have:
+
+```{r}
+print(LPML1 )
+print(LPML9)
+```
+
+which shows that by adding "diabetes" the model slightly improves. So we include this predictor in our model.
+
+
+(9)
+
+
+```{r}
+BF<-exp(LPML9-LPML1)
+print(BF)
+```
+
+So, based on the Bayes Factor criterion, the model with diabetes outperform the one without diabetes with this BF. It improves but the effect is minor.
+
+
+
+(10)
+
+Sensivity Analysis:
+
+The last model that we have considered is the best one. So we do the sensivity analysis on this model. 
+
+we considered g-prior for our model so we assign $\tau=Ga(0.01,0.01)$ and $g=1$. 
+
+
+```{r}
+BMI=(BMI-mean(BMI))/sd(BMI)
+age=(age-mean(age))/sd(age)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=1,
+beta0=beta0,
+C0inv=C0inv,
+a=0.01, ## diffuse prior
+b=0.01 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit2<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC10=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC10 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML10 <- sum(log(CPO))
+Eva10=c(DIC10,BIC10,LPML10)
+```
+
+
+Also for the next run we consider $\tau=Ga(0.1,0.1)$ and $g=n$.
+
+```{r}
+BMI=(BMI-mean(BMI))/sd(BMI)
+age=(age-mean(age))/sd(age)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=n,
+beta0=beta0,
+C0inv=C0inv,
+a=0.1, ## diffuse prior
+b=0.1 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit3<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC10=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC10 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML10 <- sum(log(CPO))
+Eva10=c(DIC10,BIC10,LPML10)
+```
+
+
+
+We plot some of the parameters to see the effect of priors: 
+
+
+
+
+```{r}
+library(bayesplot)
+LDL1.mcmc<-as.mcmc(LDL1.fit1)
+mcmc_intervals(LDL1.mcmc, pars=c("beta[6]","beta[1]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.9, # 90% - outer
+point_est = "mean"
+)
+LDL1.mcmc2<-as.mcmc(LDL1.fit2)
+mcmc_intervals(LDL1.mcmc2, pars=c("beta[6]","beta[1]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.9, # 90% - outer
+point_est = "mean"
+)
+LDL1.mcmc3<-as.mcmc(LDL1.fit2)
+mcmc_intervals(LDL1.mcmc3, pars=c("beta[6]","beta[1]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.9, # 90% - outer
+point_est = "mean"
+)
+```
+
+
+The results shows that the model is not so sensitive to the selection of priors. The parameters which are calculated are pretty much the same for the different priors. We included differet $\tau$ and also different $g$ in our analysis. The only case that change the results is for the case that $g=1$ which is so small.
+
+
+(11)
+
+In our previous model we considered g-prior and for the sensivity analysis we considered different values of g. So, for this part we consider different independent priors as:
+
+$p(\beta,\tau)=p(\beta)p(\tau)$ where $\beta=N(\beta_0,C_0)$ and $\tau=Ga(a,b)$.
+
+(1) $a=0.1$ $b=0.2$ $\beta_0=0$  $C_0=(X'X)^{-1}$
+
+(2) $a=0.01$ $b=0.01$ $\beta_0=1$  $C_0=(X'X)^{-1}$
+
+(3) $a=0.001$ $b=0.002$ $\beta_0=0$  $C_0=10(X'X)^{-1}$
+
+
+
+```{r}
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+beta0=beta0,
+C0inv=C0inv,
+a=0.1, ## diffuse prior
+b=0.2 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC11=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC11 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML11 <- sum(log(CPO))
+Eva11=c(DIC11,BIC11,LPML11)
+```
+
+
+
+
+```{r}
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+beta0=rep(1,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+beta0=beta0,
+C0inv=C0inv,
+a=0.01, ## diffuse prior
+b=0.01 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC12=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC12 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML12 <- sum(log(CPO))
+Eva12=c(DIC12,BIC12,LPML12)
+```
+
+
+
+```{r}
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/10*C0inv)
+tau ~ dgamma(a,b)
+}"
+
+jags.param=c("beta","tau","mu","CPOinv")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC13=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC13 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML13 <- sum(log(CPO))
+Eva13=c(DIC13,BIC13,LPML13)
+```
+
+
+In order to select between different priors we evaluate the scores for g-prior and independent priors that we considered. 
+
+```{r}
+print(Eva10)
+print(Eva11)
+print(Eva12)
+print(Eva13)
+```
+
+The result shows that the best prior is the first one which corresponds to the g-prior that we considered for our model.
+
+
+
+(12)
+
+
+```{r}
+BMI=(BMI-mean(BMI))/sd(BMI)
+age=(age-mean(age))/sd(age)
+X.mat=model.matrix(~ as.factor(HT=="hormone therapy")+ as.factor(exercise=="yes")+as.factor(smoking=="yes")+as.factor(statins=="yes")+BMI+age+as.factor(statins=="yes")*BMI+as.factor(diabetes=="yes"))
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+g=max(r^2,n)
+beta0=rep(0,r)
+C0inv=t(X.mat) %*% X.mat 
+jags.data=list(
+Y=LDL1, 
+Xmat=X.mat,
+r=r,
+n=n,
+g=g,
+beta0=beta0,
+C0inv=C0inv,
+a=0.001, ## diffuse prior
+b=0.001 ## diffuse prior
+)
+
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]+beta[5]*Xmat[i,5]+ beta[6]*Xmat[i,6] + beta[7]*Xmat[i,7]+ beta[8]*Xmat[i,8]+beta[9]*Xmat[i,9]
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+}
+beta[1:r] ~ dmnorm(beta0,tau/g*C0inv)
+tau ~ dgamma(a,b)
+W60HTNsmokeNdrink25.8NSND = beta[1] +beta[2] + beta[3] +  beta[6]*(-0.5) + beta[7]*1.01
+W60HTNsmokeNdrink25.8SND= beta[1]  +beta[2]+ beta[3] +beta[5]+  beta[6]*(-0.5) + beta[7]*1.01+beta[8]*(-0.5)
+W60NHTNsmokeNdrink25.8NSND = beta[1]  + beta[3] +  beta[6]*(-0.5) + beta[7]*1.01
+
+}"
+
+jags.param=c("beta","tau","mu","CPOinv","W60HTNsmokeNdrink25.8NSND","W60HTNsmokeNdrink25.8SND","W60NHTNsmokeNdrink25.8NSND")
+LDL1.fit1<- jags(data=jags.data, parameters.to.save = jags.param,
+model.file=textConnection(model0), n.iter=2000, n.chains=1,
+n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC9=LDL1.fit1$BUGSoutput$DIC
+pm_tau=LDL1.fit1$BUGSoutput$summary["tau", "mean"]
+pm_coeff=LDL1.fit1$BUGSoutput$summary[c("beta[1]", "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]"), "mean"]
+BIC9 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((LDL1-(pm_coeff[1]+pm_coeff[2]*ifelse(HT=="hormone therapy",1,0)+pm_coeff[3]*ifelse(exercise=="yes",1,0)+pm_coeff[4]*ifelse(smoking=="yes",1,0)+pm_coeff[5]*ifelse(statins=="yes",1,0)+pm_coeff[6]*BMI+pm_coeff[7]*age+pm_coeff[8]*ifelse(HT=="hormone therapy",1,0)*ifelse(statins=="yes",1,0)+pm_coeff[9]*ifelse(diabetes=="yes",1,0)))^2)+ (r+1)*log(n)
+CPO <- 1/LDL1.fit1$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML9 <- sum(log(CPO))
+Eva9=c(DIC9,BIC9,LPML9)
+```
+
+The results for (1) a  60  years-old  woman  that  is  undergoing  HT,  doesn’tsmoke nor consume alcohol, does some exercise, doesn’t use statins, doesn’t havediabetes, and has a BMI of 25.8. (2) the same but statins user (3) the same in the placebo group are respectively as:
+
+
+```{r}
+jags.mcmc=as.mcmc(LDL1.fit1)
+mcmc_dens(jags.mcmc,pars="W60HTNsmokeNdrink25.8NSND")
+mcmc_dens(jags.mcmc,pars="W60HTNsmokeNdrink25.8SND")
+mcmc_dens(jags.mcmc,pars="W60NHTNsmokeNdrink25.8NSND")
+LDL1.fit1$BUGSoutput$summary[c("W60HTNsmokeNdrink25.8NSND", "W60HTNsmokeNdrink25.8SND","W60NHTNsmokeNdrink25.8NSND"),]
+```
+
+
+
+#Methodological questions:
+
+
+(13)
+
+The  clinical  trial  was  conducted  at  20  US  clinical  centers. So, in order to include its effect we consider the hirarchial model for our problem as:
+$$y_{ij}=N(\beta,\tau_j)$$
+where $j$ represents the clinical  center. Also we have:
+$$\beta=N(0,\tau_j/g(X'X))$$
+to make the priors dependent, we consider the following distribution for $\tau_j$:
+
+$$\tau_j=N(0,c)$$
+with c=0.01.
+
+
+(14)
+
+the choice between a standard improper prior and a prior with $\beta_j=N(0,10^6)$ and $\tau=Ga(0.001,0.001)$:
+
+For the standard improper prior(SIR) the prior is flat and noninformative so the prior doesn't effect. But, it is improper which means that there is no garauntee for the good approximation. But for the prior with $\beta_j=N(0,10^6)$ and $\tau=Ga(0.001,0.001)$, the prior converges to the SIR but it is informative in which we can use the experiment data to better estimation of the posterior. 
+
+
+
+(15)
+
+g- prior can provide an informative prior where it is hard to elicit informative conjucate prior for the linear regression. For the covariance matrix we can assign the $X$(real samples) instead of $\tilde{X}$ since the eigenvalues of $X'X$ provides information on the curvature and direction of distribution. For the independent regression we assign $p(\beta,\tau)=p(\beta)p(\tau)$. In order to assign a good independent prior which is informative, we need some experimental knowledge. Otherwise, the results are so sensitive to the selection of the prior.  
+
+
+
+
+(16)
+
+The log pseudomarginal likelihood (LMPL)  is derived from predictive considerations. This approach has seen increased popularity, in part because it is very easy to compute from MCMC output. Also, it may be easier to work with thepseudomarginal likelihood. For the criterion it is reasonable to choose a model that maximizes thepseudomarginal likelihood or the LPML.
+
+These model selection criteria are appropriate for comparing models that have a common measurement scale for the data y andthe same sampling scheme: for example, they are not OK to compare a binomial model to a negative binomial model. But if the models have different measurement scale LPML is not a good criterion to compare them.
+
+
+
+(17)
+
+
+The Bayes Factor can be used in general also to test two competing hypotheses, besides two competing models. the two parameters need not even have the same dimension or anything in common
+
+Traditionally, strength of evidence for model(or hypotheses) is decided based on the following table for BFs:
+
+0 to 2(not really worth considering),
+2 to 6(positive), 6 to 10 (strong),>10(very strong). 
+
+One of the neat features of Bayes factors is their transitivity. If I know that Model A outperforms Model B by 3, and I know that Model B outperforms Model C by 4, then I know that Model A outperforms Model C by 12. 
+
+On the other hand, they are not defined with improper priors.
+One criticism of Bayes Factors is the (implicit) assumption that one of the competing models (M1 or M2) is correct. For complex models, the post-MCMC compositional sampling(Monte Carlo) may be very inefficient and computationally costly.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Problem 2
+
+
+(1)
+An exploratory data analysis:
+
+
+```{r}
+rm(list=ls())
+
+MEDVdata <- data(Boston, package="MASS")
+MEDVdata <- Boston
+attach(MEDVdata)
+options(contrasts=c("contr.treatment","contr.poly"))
+```
+
+
+
+Next, we use pairs to examine effects of different parameters including:
+
+CRIM - per capita crime rate by town
+INDUS - proportion of non-retail business acres per town.
+NOX - nitric oxides concentration (parts per 10 million)
+RM - average number of rooms per dwelling
+PTRATIO - pupil-teacher ratio by town
+LSTAT - % lower status of the population
+
+
+
+```{r}
+pairs(~medv+crim+indus+nox+rm+ptratio+lstat,labels=c("medv","crim","indus","nox","rm","ptratio","lstat"),data=MEDVdata)
+```
+
+
+
+
+The figures show the MEDV goes up linearly as "rm" increases. Also by increasing Istat MEDV decreases. Also for small value of indus we get higher value of MEDV. For the ptratio and nox there is not specific relation between their valu and value of MEDV in the figures
+
+
+
+(2)
+
+
+Selecting the priors:
+
+ For this problem we use g-prior for the coefficients. By using g-prior, the prior places more mass in areas of the parameter space where we expect the data to be less informative about the parameters. 
+
+
+So for the parameters we  consider g-prior as:
+$$\beta|\tau\sim N_r(0,\frac{g}{\tau}(X'X)^{-1})$$
+where we have:
+$$\tau\sim Ga(a,b)$$
+$$g=max(n,r^2)$$
+
+Here, we make the assumption that the design matrix X is known and fixed, so even the prior with $\beta_0=0$ and $\tilde{X}=X$ is OK to use. For our problem we use $a=b=0.01$. 
+
+
+Selecting the modeles:
+
+Based on the exploratory data analysis we did in the previous part we can conclude that some of the  parameters have intense effect on the value of MEDV
+
+for the fist model we following parameters:
+
+"rm"  , "indus" "lstat"
+
+
+
+```{r}
+library(R2jags)
+
+X.mat=model.matrix(~ rm+indus+lstat)
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=max(n,r^2)
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.01,b=0.01## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","mu","CPOinv")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=1,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC1=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+                                  "beta[2]","beta[3]","beta[4]"), "mean"]
+BIC1 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML1 <- sum(log(CPO0))
+EVA1=c(DIC1,BIC1,LPML1)
+print(EVA1)
+```
+
+For the next model we consider all the linear parameters as :
+
+"rm" "lstat" "crim" "indus" "nox" "ptratio"
+```{r}
+library(R2jags)
+
+X.mat=model.matrix(~ rm+indus+lstat+nox+ptratio+crim)
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=max(n,r^2)
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.01,b=0.01## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
++ beta[5]*Xmat[i,5] + beta[6]*Xmat[i,6]+ beta[7]*Xmat[i,7]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","mu","CPOinv")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=1,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC2=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+       "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]"), "mean"]
+BIC2 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML2 <- sum(log(CPO0))
+EVA2=c(DIC2,BIC2,LPML2)
+print(EVA2)
+```
+
+
+The scores have been improved. For the next model we include nonlinear terms of the parameters:
+"rm"^2 "ptratio"^2  , "lstat"^2
+Since the figures in the previous parts show that they have main effects.
+
+
+
+
+```{r}
+library(R2jags)
+
+rm2=rm^2
+ptratio2=ptratio^2
+lstat2=lstat^2
+
+
+X.mat=model.matrix(~ rm+indus+lstat+nox+ptratio+crim+rm2+ptratio2+lstat2 )
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=max(n,r^2)
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.01,b=0.01## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
++ beta[5]*Xmat[i,5] + beta[6]*Xmat[i,6]+ beta[7]*Xmat[i,7]+beta[8]*Xmat[i,8] + beta[9]*Xmat[i,9]+ beta[10]*Xmat[i,10]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","mu","CPOinv")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=4,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC3=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+       "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]","beta[10]"), "mean"]
+BIC3 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML3 <- sum(log(CPO0))
+EVA3=c(DIC3,BIC3,LPML3)
+print(EVA3)
+```
+
+Again the model have been improved.
+
+```{r}
+print(EVA1)
+print(EVA2)
+print(EVA3)
+```
+
+The scores show that the last model in the best one. To make sure about the model we do the diagnostics.
+
+
+
+Model diagnostics:
+
+
+
+```{r}
+pm_t=X.mat %*% pm_coeff
+resi=medv-pm_t
+plot(pm_t,resi)
+qqnorm(resi)
+qqline(resi)
+```
+
+
+The first figure shows that the value of residual are near zero also it does not specify a specific form. From the second figure we see that the data with high probability (-1< Quantiles < 1) we get linear results. 
+
+So the model diagnostics shows that our model is a good approximation for the data.
+For the rest of our analysis we consider the last model.
+
+
+
+For the convergence analysis using Gelman-Rubin statistics we have:
+
+
+
+```{r}
+library(bayesplot)
+jags.mcmc=as.mcmc(fit)
+autocorr.plot(jags.mcmc[,4])
+gelman.plot(jags.mcmc[,4])
+```
+
+There is no garuntee to make sure that we are sampling from the right distribution. However the results show that there is no sign for any problem in the convergence. the shrink factor also converges to value between 1 and 1.1 which is OK.
+
+
+(3)
+
+posterior inferences for regression parameters:
+
+in the plots show the posterior inferences for regression parameters:
+
+```{r}
+library(bayesplot)
+jags.mcmc<-as.mcmc(fit)
+mcmc_intervals(jags.mcmc, pars=c("beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]","beta[10]"),
+prob = 0.9, # 90% intervals - inner
+prob_outer = 0.90, # 90% - outer
+point_est = "mean"
+)
+```
+
+```{r}
+ library(bayesplot)
+
+jags.mcmc=as.mcmc(fit) 
+par(mfrow=c(1,2))
+mcmc_dens(jags.mcmc,pars=c("beta[2]"))
+mcmc_dens(jags.mcmc,pars=c("beta[3]"))
+mcmc_dens(jags.mcmc,pars=c("beta[4]"))
+mcmc_dens(jags.mcmc,pars=c("beta[5]"))
+```
+
+The results show that rm has the biggest effect on the value of MEDV. also, ptratio is the other parameters that have high effect on the value MEDV.
+
+
+
+
+
+(4)
+
+
+Determine  normal  house  values  for  several  different  types :
+
+(a)   a  house  in  a  high  crime  rate(crim=1.3)
+
+
+(b)   a  house  with  low  pupil-teacherratio(ptratio=16)
+
+(c)   a house with high a small number of rooms(rm=7)
+
+
+
+```{r}
+library(R2jags)
+
+rm2=rm^2
+ptratio2=ptratio^2
+lstat2=lstat^2
+
+
+X.mat=model.matrix(~ rm+indus+lstat+nox+ptratio+crim+rm2+ptratio2+lstat2 )
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=max(n,r^2)
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.01,b=0.01## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
++ beta[5]*Xmat[i,5] + beta[6]*Xmat[i,6]+ beta[7]*Xmat[i,7]+beta[8]*Xmat[i,8] + beta[9]*Xmat[i,9]+ beta[10]*Xmat[i,10]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+
+house_Hcrime = beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])
++ beta[5]*mean(Xmat[,5]) + beta[6]*mean(Xmat[,6])+ beta[7]*1.3+beta[8]*mean(Xmat[,8]) + beta[9]*mean(Xmat[,9])+ beta[10]*mean(Xmat[,10])
+
+house_Lptratio = beta[1] + beta[2]*mean(Xmat[,2]) + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])
++ beta[5]*mean(Xmat[,5]) + beta[6]*16+ beta[7]*mean(Xmat[,7])+beta[8]*mean(Xmat[,8]) + beta[9]*16*16+ beta[10]*mean(Xmat[,10])
+
+house_Hrooms = beta[1] + beta[2]*7 + beta[3]*mean(Xmat[,3]) + beta[4]*mean(Xmat[,4])+ beta[5]*mean(Xmat[,5]) + beta[6]*mean(Xmat[,6])+ beta[7]*mean(Xmat[,7])+beta[8]*7*7 + beta[9]*mean(Xmat[,9])+ beta[10]*mean(Xmat[,10])
+
+
+}"
+jags.param=c("beta","tau","mu","CPOinv","house_Hcrime", "house_Lptratio","house_Hrooms")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=4,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC3=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+       "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]","beta[10]"), "mean"]
+BIC3 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML3 <- sum(log(CPO0))
+EVA3=c(DIC3,BIC3,LPML3)
+print(EVA3)
+```
+
+
+```{r}
+jags.mcmc=as.mcmc(fit)
+mcmc_dens(jags.mcmc,pars="house_Hcrime")
+mcmc_dens(jags.mcmc,pars="house_Lptratio")
+mcmc_dens(jags.mcmc,pars="house_Hrooms")
+fit$BUGSoutput$summary[c("house_Hcrime", "house_Lptratio","house_Hrooms"),]
+```
+
+
+The results show that for the regions with the high crime the mean is lower than mean in all the region which is reasonable. Also for the house with  low  pupil-teacherratio the average is a bit lower. The house price for the houses with high number of rooms is greater than the overal average which is again reasonable.
+
+
+(5)
+
+The sensitivity analysis:
+
+
+for the sensitivity analysis we consider different priors for our model.
+
+The last model that we have considered is the best one. So we do the sensivity analysis on this model. 
+
+we considered g-prior for our model so we assign $\tau=Ga(0.001,0.001)$ and $g=1$.
+
+```{r}
+library(R2jags)
+
+rm2=rm^2
+ptratio2=ptratio^2
+lstat2=lstat^2
+
+
+X.mat=model.matrix(~ rm+indus+lstat+nox+ptratio+crim+rm2+ptratio2+lstat2 )
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=1
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.001,b=0.001## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
++ beta[5]*Xmat[i,5] + beta[6]*Xmat[i,6]+ beta[7]*Xmat[i,7]+beta[8]*Xmat[i,8] + beta[9]*Xmat[i,9]+ beta[10]*Xmat[i,10]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","mu","CPOinv")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=4,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC4=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+       "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]","beta[10]"), "mean"]
+BIC4 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML4 <- sum(log(CPO0))
+EVA4=c(DIC4,BIC4,LPML4)
+print(EVA4)
+```
+
+
+
+Also for the next run we consider $\tau=Ga(0.1,0.1)$ and $g=n$.
+
+
+```{r}
+library(R2jags)
+
+rm2=rm^2
+ptratio2=ptratio^2
+lstat2=lstat^2
+
+
+X.mat=model.matrix(~ rm+indus+lstat+nox+ptratio+crim+rm2+ptratio2+lstat2 )
+r=dim(X.mat)[2]
+n=dim(X.mat)[1]
+
+g=n
+C0inv=t(X.mat) %*% X.mat
+X0=rep(0,r)
+
+
+jags.data=list(
+  Y=medv,
+  Xmat=X.mat,
+  r=r,
+  n=n,
+  g=g,
+  X0=X0,
+  C0inv=C0inv,
+  a=0.1,b=0.1## diffuse prior
+)
+model0 <- "model{
+for(i in 1:n){
+Y[i] ~ dnorm(mu[i],tau)
+CPOinv[i] <- sqrt(2*3.14159/tau)*exp(0.5*tau*pow(Y[i]-mu[i],2))
+mu[i] <- beta[1] + beta[2]*Xmat[i,2] + beta[3]*Xmat[i,3] + beta[4]*Xmat[i,4]
++ beta[5]*Xmat[i,5] + beta[6]*Xmat[i,6]+ beta[7]*Xmat[i,7]+beta[8]*Xmat[i,8] + beta[9]*Xmat[i,9]+ beta[10]*Xmat[i,10]
+}
+beta[1:r] ~ dmnorm(X0,tau/g * C0inv)
+tau ~ dgamma(a,b)
+}"
+jags.param=c("beta","tau","mu","CPOinv")
+fit<- jags(data=jags.data, parameters.to.save = jags.param,
+           model.file=textConnection(model0), n.iter=2000, n.chains=4,
+           n.burnin=500, n.thin=1, DIC=T, digits=6)
+
+
+DIC5=fit$BUGSoutput$DIC
+pm_tau=fit$BUGSoutput$summary["tau", "mean"]
+pm_coeff=fit$BUGSoutput$summary[c("beta[1]",
+       "beta[2]","beta[3]","beta[4]","beta[5]","beta[6]","beta[7]","beta[8]","beta[9]","beta[10]"), "mean"]
+BIC5 <- -n*log(pm_tau)+n*log(2*pi) + pm_tau*sum((medv-(X.mat %*% pm_coeff))^2)+ (r+1)*log(n)
+CPO0 <- 1/fit$BUGSoutput$mean$CPOinv ## CPO is a vector of length n
+LPML5 <- sum(log(CPO0))
+EVA5=c(DIC5,BIC5,LPML5)
+print(EVA5)
+```
+
+
+Now we plot the scores:
+
+
+```{r}
+print(EVA1)
+print(EVA4)
+print(EVA5)
+```
+
+
+
+
+The results show that the model is not sensitive to the value of $\tau$. But it is sensitive to the value of g. when we assign g=1 the results are different from the other cases. But if we just change the value of $\tau$ we get similar results.
+
+
+(6)
+
+In this problem we consider the linear regression analysis for the meadian of house price with different parameters:
+
+CRIM - per capita crime rate by town
+INDUS - proportion of non-retail business acres per town.
+NOX - nitric oxides concentration (parts per 10 million)
+RM - average number of rooms per dwelling
+PTRATIO - pupil-teacher ratio by town
+LSTAT - % lower status of the population
+
+first we did the exploratory data analysis to see the effects of different parameters. the results show that the MEDV goes up linearly as "rm" increases. Also by increasing Istat MEDV decreases. Also for small value of indus we get higher value of MEDV.
+
+we considered a model with g-priors and different selections of parameters. We calculate the scores(BIC,DIC and LPML) to obtain the best model. Then, we did the diagnostic analysis and convergence analysis for our model. The results show that there is no sign of bad behavoiur in the model. So we did the analysis for the best model selection which includes nonlinear terms of "rm" "ptratio" and "lstat2and".
+
+
+Also we did the sensivity analysis which shows that the model are not sensitive to the value of $\tau$. But the value of g can changes the results( for the very low values). Also we obtain the mean ofmedv for different subgroups as defined in the problem. 
+
+
